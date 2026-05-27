@@ -490,7 +490,7 @@ div[data-testid="element-container"]:has(button:contains("FAB_TRIGGER_HIDDEN")) 
 /* モバイル: Streamlit Cloud の右下「Manage app」ボタンと被らないように、少し上に */
 @media (max-width: 640px) {
     .fab-button {
-        bottom: 90px;
+        bottom: 45px;
         right: 16px;
         width: 56px;
         height: 56px;
