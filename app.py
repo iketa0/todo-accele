@@ -160,21 +160,6 @@ header[data-testid="stHeader"] {
 .stCheckbox > label {
     font-size: 1rem !important;
 }
-
-/* ===== 非表示のトリガーボタン ===== */
-/* "FAB_TRIGGER_HIDDEN" キーのボタンを画面外に追いやる */
-div[data-testid="stButton"]:has(button[kind="secondary"]) {
-    /* ここでは全部に影響するので、JSで判別する */
-}
-.hidden-trigger {
-    position: absolute;
-    left: -9999px;
-    top: -9999px;
-    width: 0;
-    height: 0;
-    overflow: hidden;
-    visibility: hidden;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -420,154 +405,79 @@ if not df_done.empty:
                     st.rerun()
 
 
-# ===== 隠しトリガーボタン（Streamlit ネイティブ）=====
-# JavaScript からクリックされる本物のボタン
-# CSSで画面外に追いやって見えなくしている
-trigger_container = st.container()
-with trigger_container:
-    if st.button("FAB_TRIGGER_HIDDEN", key="fab_trigger_hidden_btn"):
-        add_task_dialog()
-
-
-# ===== 右下固定 FAB（見た目だけのHTMLボタン）=====
+# ===== 右下固定 FAB =====
+# Streamlit 1.36+ は key を持つウィジェットの親 div に `.st-key-<key>` クラスを付ける。
+# それを CSS で `position: fixed` で右下に固定し、丸い青ボタンに整形する。
+# st.dialog はネイティブの click → rerun フローで安定して開く。
 st.markdown("""
 <style>
-/* 隠しトリガーボタン: 画面外へ */
-div[data-testid="stButton"]:has(button[data-testid*="fab_trigger_hidden_btn"]),
-div[data-testid="element-container"]:has(button:contains("FAB_TRIGGER_HIDDEN")) {
-    position: absolute !important;
-    left: -9999px !important;
-    top: -9999px !important;
-    width: 0 !important;
-    height: 0 !important;
-    overflow: hidden !important;
-    visibility: hidden !important;
-}
-
-
-/* FAB本体 */
-.fab-button {
+div.st-key-fab_add {
     position: fixed;
     bottom: 80px;
     right: 24px;
+    width: auto;
+    z-index: 99999;
+}
+
+div.st-key-fab_add button {
     width: 60px;
     height: 60px;
+    min-height: 60px;
     border-radius: 50%;
     background-color: #1976D2;
     color: white;
-    font-size: 36px;
-    font-weight: 300;
     border: none;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.2);
     cursor: pointer;
-    z-index: 99999;
+    padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    line-height: 1;
-    text-decoration: none;
     transition: all 0.15s ease;
-    user-select: none;
     -webkit-tap-highlight-color: transparent;
-    padding: 0;
-    margin: 0;
 }
-.fab-button:hover {
+
+div.st-key-fab_add button:hover {
     background-color: #1E88E5;
+    color: white;
+    border: none;
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
     transform: scale(1.05);
 }
-.fab-button:active {
+
+div.st-key-fab_add button:active,
+div.st-key-fab_add button:focus {
     background-color: #1565C0;
-    transform: scale(0.95);
-}
-.fab-button .fab-icon {
-    display: block;
-    line-height: 1;
-    margin-top: -4px;
+    color: white;
+    border: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-/* モバイル: Streamlit Cloud の右下「Manage app」ボタンと被らないように、少し上に */
+div.st-key-fab_add button p,
+div.st-key-fab_add button div {
+    font-size: 32px;
+    font-weight: 300;
+    line-height: 1;
+    margin: 0;
+}
+
 @media (max-width: 640px) {
-    .fab-button {
+    div.st-key-fab_add {
         bottom: 45px;
         right: 16px;
+    }
+    div.st-key-fab_add button {
         width: 56px;
         height: 56px;
-        font-size: 32px;
+        min-height: 56px;
+    }
+    div.st-key-fab_add button p,
+    div.st-key-fab_add button div {
+        font-size: 28px;
     }
 }
 </style>
-
-<button id="custom-fab-button" class="fab-button" aria-label="新しいタスクを追加" onclick="triggerFab()">
-    <span class="fab-icon">+</span>
-</button>
-
-<script>
-// 隠しのStreamlitボタンを探してクリックする
-function triggerFab() {
-    // 親ウィンドウ(top-level)を探索
-    const doc = window.parent ? window.parent.document : document;
-    const buttons = doc.querySelectorAll('button');
-    for (const btn of buttons) {
-        if (btn.textContent && btn.textContent.trim() === 'FAB_TRIGGER_HIDDEN') {
-            btn.click();
-            return;
-        }
-    }
-    // 見つからない場合は普通の document を見る
-    const buttons2 = document.querySelectorAll('button');
-    for (const btn of buttons2) {
-        if (btn.textContent && btn.textContent.trim() === 'FAB_TRIGGER_HIDDEN') {
-            btn.click();
-            return;
-        }
-    }
-    console.log('FAB trigger button not found');
-}
-
-// FABが他のコンポーネントによって覆われていないか確認し、必要なら再配置
-(function ensureFabOnTop() {
-    const doc = window.parent ? window.parent.document : document;
-    const fab = doc.getElementById('custom-fab-button');
-    if (!fab && document.getElementById('custom-fab-button')) {
-        // ローカル文書にしかない場合、親に移動
-        const localFab = document.getElementById('custom-fab-button');
-        if (doc.body) {
-            doc.body.appendChild(localFab);
-        }
-    }
-})();
-
-// 隠しボタンを物理的に画面外に追いやる（CSSが効かない場合のフォールバック）
-(function hideTriggerButton() {
-    const doc = window.parent ? window.parent.document : document;
-    function hideIt() {
-        const buttons = doc.querySelectorAll('button');
-        for (const btn of buttons) {
-            if (btn.textContent && btn.textContent.trim() === 'FAB_TRIGGER_HIDDEN') {
-                const container = btn.closest('[data-testid="stButton"]') || btn.closest('[data-testid="element-container"]') || btn.parentElement;
-                if (container) {
-                    container.style.position = 'absolute';
-                    container.style.left = '-9999px';
-                    container.style.top = '-9999px';
-                    container.style.width = '0';
-                    container.style.height = '0';
-                    container.style.overflow = 'hidden';
-                    container.style.visibility = 'hidden';
-                }
-            }
-        }
-    }
-    hideIt();
-    setTimeout(hideIt, 100);
-    setTimeout(hideIt, 500);
-    setTimeout(hideIt, 1000);
-    
-    const observer = new MutationObserver(hideIt);
-    if (doc.body) {
-        observer.observe(doc.body, { childList: true, subtree: true });
-    }
-})();
-</script>
 """, unsafe_allow_html=True)
+
+if st.button("＋", key="fab_add", help="新しいタスクを追加"):
+    add_task_dialog()
