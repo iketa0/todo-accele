@@ -1,17 +1,18 @@
 """
-アクセルプラス やることリスト (Todo アプリ) v2.0
+アクセルプラス やることリスト (Todo アプリ) v3.0
 
 シンプルUI:
 - タイトルなし
-- 「+ 新しいタスクを追加」ボタンを画面下部に固定
-- ボタンを押すとモーダルで追加フォーム表示
+- 右下に常時固定のFAB（青い丸ボタン、Dropbox風）
+- FABを押すとモーダルで追加フォーム表示
+- URLパラメータでモーダル開閉を制御（安定動作）
 """
 import streamlit as st
 from datetime import datetime, date, timedelta
 import sheets_client as sc
 
 
-APP_VERSION = "v2.0"
+APP_VERSION = "v3.0"
 APP_VERSION_DATE = "2026-05-27"
 
 ASSIGNEES = ["社長", "kazuki"]
@@ -29,13 +30,82 @@ st.set_page_config(
 )
 
 
+# ===== Google Sheets 接続 =====
+@st.cache_resource
+def get_worksheet():
+    """ワークシートをキャッシュして取得"""
+    service_account_info = dict(st.secrets["gcp_service_account"])
+    spreadsheet_id = st.secrets["sheets"]["spreadsheet_id"]
+    client = sc.get_client(service_account_info)
+    return sc.get_worksheet(client, spreadsheet_id)
+
+
+try:
+    worksheet = get_worksheet()
+except Exception as e:
+    st.error("⚠️ Google Sheets に接続できません")
+    st.code(str(e))
+    st.info("Streamlit Secrets の設定を確認してください")
+    st.stop()
+
+
+# ===== セッションステート =====
+if 'filter_assignee' not in st.session_state:
+    st.session_state.filter_assignee = "全員"
+if 'editing_id' not in st.session_state:
+    st.session_state.editing_id = None
+
+
+# ===== モーダル：タスク追加 =====
+@st.dialog("新しいタスク")
+def add_task_dialog():
+    new_task = st.text_input(
+        "タスク内容",
+        placeholder="例: ○○の書類を提出",
+    )
+    
+    new_assignee = st.radio(
+        "担当",
+        ASSIGNEES,
+        horizontal=True,
+    )
+    
+    has_deadline = st.checkbox("期限を設定する", value=False)
+    
+    if has_deadline:
+        new_deadline = st.date_input(
+            "期限",
+            value=date.today() + timedelta(days=7),
+            min_value=date.today() - timedelta(days=30),
+            max_value=date.today() + timedelta(days=365),
+        )
+    else:
+        new_deadline = None
+    
+    if st.button("✅ 追加", type="primary", use_container_width=True):
+        if not new_task.strip():
+            st.warning("タスク内容を入力してください")
+        else:
+            deadline_str = new_deadline.strftime('%Y-%m-%d') if new_deadline else ''
+            sc.add_task(worksheet, new_task.strip(), new_assignee, deadline_str)
+            # URLパラメータをクリア
+            st.query_params.clear()
+            st.rerun()
+
+
+# ===== URLパラメータでモーダル開閉を制御 =====
+# ?add=1 が付いていたらモーダルを開く
+if 'add' in st.query_params:
+    add_task_dialog()
+
+
 # ===== スタイル =====
 st.markdown("""
 <style>
 /* メインコンテナのパディング */
 .main .block-container {
     padding-top: 1rem;
-    padding-bottom: 100px;  /* 下の固定ボタンと被らない余白 */
+    padding-bottom: 120px;  /* FABと被らない余白 */
     padding-left: 1rem;
     padding-right: 1rem;
     max-width: 720px;
@@ -101,90 +171,12 @@ header[data-testid="stHeader"] {
     font-weight: bold;
 }
 
-/* チェックボックスの大きさ */
+/* チェックボックス */
 .stCheckbox > label {
     font-size: 1rem !important;
 }
-
-/* ===== 画面下部固定ボタン用コンテナ ===== */
-.bottom-fixed-button {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background-color: #0E1117;
-    padding: 12px 16px;
-    border-top: 1px solid #2a2d3a;
-    z-index: 9999;
-    box-shadow: 0 -4px 12px rgba(0,0,0,0.3);
-}
-.bottom-fixed-button-inner {
-    max-width: 720px;
-    margin: 0 auto;
-}
 </style>
 """, unsafe_allow_html=True)
-
-
-# ===== Google Sheets 接続 =====
-@st.cache_resource
-def get_worksheet():
-    """ワークシートをキャッシュして取得"""
-    service_account_info = dict(st.secrets["gcp_service_account"])
-    spreadsheet_id = st.secrets["sheets"]["spreadsheet_id"]
-    client = sc.get_client(service_account_info)
-    return sc.get_worksheet(client, spreadsheet_id)
-
-
-try:
-    worksheet = get_worksheet()
-except Exception as e:
-    st.error("⚠️ Google Sheets に接続できません")
-    st.code(str(e))
-    st.info("Streamlit Secrets の設定を確認してください")
-    st.stop()
-
-
-# ===== セッションステート =====
-if 'filter_assignee' not in st.session_state:
-    st.session_state.filter_assignee = "全員"
-if 'editing_id' not in st.session_state:
-    st.session_state.editing_id = None
-
-
-# ===== モーダルダイアログ：タスク追加 =====
-@st.dialog("新しいタスク")
-def add_task_dialog():
-    new_task = st.text_input(
-        "タスク内容",
-        placeholder="例: ○○の書類を提出",
-    )
-    
-    new_assignee = st.radio(
-        "担当",
-        ASSIGNEES,
-        horizontal=True,
-    )
-    
-    has_deadline = st.checkbox("期限を設定する", value=False)
-    
-    if has_deadline:
-        new_deadline = st.date_input(
-            "期限",
-            value=date.today() + timedelta(days=7),
-            min_value=date.today() - timedelta(days=30),
-            max_value=date.today() + timedelta(days=365),
-        )
-    else:
-        new_deadline = None
-    
-    if st.button("✅ 追加", type="primary", use_container_width=True):
-        if not new_task.strip():
-            st.warning("タスク内容を入力してください")
-        else:
-            deadline_str = new_deadline.strftime('%Y-%m-%d') if new_deadline else ''
-            sc.add_task(worksheet, new_task.strip(), new_assignee, deadline_str)
-            st.rerun()
 
 
 # ===== フィルタ =====
@@ -204,11 +196,9 @@ if filter_choice != st.session_state.filter_assignee:
 # ===== タスク取得 =====
 df = sc.fetch_all_tasks(worksheet)
 
-# フィルタ適用
 if not df.empty and st.session_state.filter_assignee != "全員":
     df = df[df['assignee'] == st.session_state.filter_assignee]
 
-# 未完了・完了で分割
 if not df.empty:
     df_open = df[df['status'] != '完了'].copy()
     df_done = df[df['status'] == '完了'].copy()
@@ -239,7 +229,6 @@ def categorize(deadline_str):
         return ('normal', diff)
 
 
-# カテゴリでグルーピング
 buckets = {
     'overdue': [],
     'urgent': [],
@@ -382,7 +371,7 @@ section_definitions = [
 total_open = sum(len(buckets[k]) for k in buckets)
 
 if df.empty:
-    st.info("まだタスクがありません。下の「＋」ボタンから追加してください。")
+    st.info("まだタスクがありません。右下の「＋」ボタンから追加してください。")
 elif total_open == 0:
     st.success("🎉 未完了タスクはありません！")
 else:
@@ -431,81 +420,63 @@ if not df_done.empty:
                     st.rerun()
 
 
-# ===== 画面下部固定ボタン =====
-# 通常のボタンを描画し、CSS で position: fixed にして下部に固定
-st.markdown('<div id="bottom-button-anchor"></div>', unsafe_allow_html=True)
-
-# 隠しコンテナでボタンを描画
-fab_placeholder = st.empty()
-with fab_placeholder.container():
-    if st.button("＋ 新しいタスクを追加", type="primary", use_container_width=True, key="add_task_button"):
-        add_task_dialog()
-
-# JavaScript でボタンを bottom 固定領域に移動
+# ===== 右下固定 FAB（Floating Action Button）=====
+# 純粋なHTMLで描画。URLパラメータ ?add=1 を付けてリロードすることでモーダルを開く
 st.markdown("""
 <style>
-/* 「add_task_button」キーで描画されたボタンを画面下部固定にする */
-div[data-testid="stButton"]:has(button:contains("＋ 新しいタスクを追加")) {
+/* FAB本体 */
+.fab-button {
     position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background-color: #0E1117;
-    padding: 12px 16px;
-    border-top: 1px solid #2a2d3a;
-    z-index: 9999;
-    box-shadow: 0 -4px 12px rgba(0,0,0,0.3);
-    margin: 0;
+    bottom: 24px;
+    right: 24px;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background-color: #1976D2;
+    color: white;
+    font-size: 36px;
+    font-weight: 300;
+    border: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    text-decoration: none;
+    transition: all 0.15s ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.fab-button:hover {
+    background-color: #1E88E5;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
+    transform: scale(1.05);
+}
+.fab-button:active {
+    background-color: #1565C0;
+    transform: scale(0.95);
+}
+.fab-button .fab-icon {
+    display: block;
+    line-height: 1;
+    margin-top: -4px;
 }
 
-/* ボタン自身の中身を中央寄せ */
-div[data-testid="stButton"]:has(button:contains("＋ 新しいタスクを追加")) > button {
-    max-width: 720px;
-    margin: 0 auto;
-    display: block;
+/* モバイル向け調整 */
+@media (max-width: 640px) {
+    .fab-button {
+        bottom: 20px;
+        right: 20px;
+        width: 56px;
+        height: 56px;
+        font-size: 32px;
+    }
 }
 </style>
 
-<script>
-// CSS の :has() がブラウザによって効かない場合の保険として
-// JavaScript でも最後のボタンを下部固定にする
-(function() {
-    function fixBottomButton() {
-        const buttons = window.parent.document.querySelectorAll('button');
-        for (const btn of buttons) {
-            if (btn.textContent && btn.textContent.includes('＋ 新しいタスクを追加')) {
-                const container = btn.closest('div[data-testid="stButton"]');
-                if (container && !container.classList.contains('fixed-bottom')) {
-                    container.classList.add('fixed-bottom');
-                    container.style.position = 'fixed';
-                    container.style.bottom = '0';
-                    container.style.left = '0';
-                    container.style.right = '0';
-                    container.style.backgroundColor = '#0E1117';
-                    container.style.padding = '12px 16px';
-                    container.style.borderTop = '1px solid #2a2d3a';
-                    container.style.zIndex = '9999';
-                    container.style.boxShadow = '0 -4px 12px rgba(0,0,0,0.3)';
-                    container.style.margin = '0';
-                    
-                    // ボタン自体の幅制限
-                    btn.style.maxWidth = '720px';
-                    btn.style.margin = '0 auto';
-                    btn.style.display = 'block';
-                }
-                break;
-            }
-        }
-    }
-    
-    // 初回実行
-    setTimeout(fixBottomButton, 100);
-    setTimeout(fixBottomButton, 500);
-    setTimeout(fixBottomButton, 1000);
-    
-    // DOM変更を監視
-    const observer = new MutationObserver(fixBottomButton);
-    observer.observe(window.parent.document.body, { childList: true, subtree: true });
-})();
-</script>
+<a href="?add=1" target="_self" class="fab-button" aria-label="新しいタスクを追加">
+    <span class="fab-icon">+</span>
+</a>
 """, unsafe_allow_html=True)
