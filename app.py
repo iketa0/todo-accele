@@ -1,14 +1,17 @@
 """
-アクセルプラス やることリスト (Todo アプリ)
+アクセルプラス やることリスト (Todo アプリ) v2.0
 
-スマホファースト設計、Google Sheets でデータ永続化
+シンプルUI:
+- タイトルなし
+- 「+ 新しいタスクを追加」ボタンを画面下部に固定
+- ボタンを押すとモーダルで追加フォーム表示
 """
 import streamlit as st
 from datetime import datetime, date, timedelta
 import sheets_client as sc
 
 
-APP_VERSION = "v1.0"
+APP_VERSION = "v2.0"
 APP_VERSION_DATE = "2026-05-27"
 
 ASSIGNEES = ["社長", "kazuki"]
@@ -26,22 +29,21 @@ st.set_page_config(
 )
 
 
-# ===== スマホ最適化 CSS =====
+# ===== スタイル =====
 st.markdown("""
 <style>
-/* メインコンテナのパディングを縮小 */
+/* メインコンテナのパディング */
 .main .block-container {
-    padding-top: 1.5rem;
-    padding-bottom: 2rem;
+    padding-top: 1rem;
+    padding-bottom: 100px;  /* 下の固定ボタンと被らない余白 */
     padding-left: 1rem;
     padding-right: 1rem;
     max-width: 720px;
 }
 
-/* タイトル */
-h1 {
-    font-size: 1.6rem !important;
-    margin-bottom: 0.5rem !important;
+/* デフォルトのヘッダー */
+header[data-testid="stHeader"] {
+    background: transparent;
 }
 
 /* タスクカード */
@@ -52,18 +54,10 @@ h1 {
     margin-bottom: 10px;
     border-left: 4px solid #555;
 }
-.task-card.urgent {
-    border-left-color: #FF4B4B;
-}
-.task-card.soon {
-    border-left-color: #FF9800;
-}
-.task-card.thisweek {
-    border-left-color: #FFEB3B;
-}
-.task-card.normal {
-    border-left-color: #607D8B;
-}
+.task-card.urgent { border-left-color: #FF4B4B; }
+.task-card.soon { border-left-color: #FF9800; }
+.task-card.thisweek { border-left-color: #FFEB3B; }
+.task-card.normal { border-left-color: #607D8B; }
 
 /* 担当者バッジ */
 .assignee-badge {
@@ -94,7 +88,7 @@ h1 {
 .section-header {
     font-size: 1.05rem;
     font-weight: bold;
-    margin-top: 18px;
+    margin-top: 14px;
     margin-bottom: 8px;
     padding-bottom: 4px;
     border-bottom: 1px solid #333;
@@ -110,6 +104,23 @@ h1 {
 /* チェックボックスの大きさ */
 .stCheckbox > label {
     font-size: 1rem !important;
+}
+
+/* ===== 画面下部固定ボタン用コンテナ ===== */
+.bottom-fixed-button {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: #0E1117;
+    padding: 12px 16px;
+    border-top: 1px solid #2a2d3a;
+    z-index: 9999;
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.3);
+}
+.bottom-fixed-button-inner {
+    max-width: 720px;
+    margin: 0 auto;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -135,75 +146,48 @@ except Exception as e:
 
 
 # ===== セッションステート =====
-if 'show_add_form' not in st.session_state:
-    st.session_state.show_add_form = False
 if 'filter_assignee' not in st.session_state:
     st.session_state.filter_assignee = "全員"
-if 'show_completed' not in st.session_state:
-    st.session_state.show_completed = False
 if 'editing_id' not in st.session_state:
     st.session_state.editing_id = None
 
 
-# ===== ヘッダー =====
-st.title("📋 やることリスト")
-
-
-# ===== タスク追加ボタン =====
-if not st.session_state.show_add_form:
-    if st.button("➕ 新しいタスクを追加", type="primary", use_container_width=True):
-        st.session_state.show_add_form = True
-        st.rerun()
-else:
-    with st.container(border=True):
-        st.markdown("**新しいタスク**")
-        
-        new_task = st.text_input(
-            "タスク内容",
-            placeholder="例: ○○の書類を提出",
-            label_visibility="collapsed",
+# ===== モーダルダイアログ：タスク追加 =====
+@st.dialog("新しいタスク")
+def add_task_dialog():
+    new_task = st.text_input(
+        "タスク内容",
+        placeholder="例: ○○の書類を提出",
+    )
+    
+    new_assignee = st.radio(
+        "担当",
+        ASSIGNEES,
+        horizontal=True,
+    )
+    
+    has_deadline = st.checkbox("期限を設定する", value=False)
+    
+    if has_deadline:
+        new_deadline = st.date_input(
+            "期限",
+            value=date.today() + timedelta(days=7),
+            min_value=date.today() - timedelta(days=30),
+            max_value=date.today() + timedelta(days=365),
         )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            new_assignee = st.radio(
-                "担当",
-                ASSIGNEES,
-                horizontal=True,
-                label_visibility="visible",
-            )
-        with col2:
-            has_deadline = st.checkbox("期限を設定する", value=False)
-        
-        if has_deadline:
-            new_deadline = st.date_input(
-                "期限",
-                value=date.today() + timedelta(days=7),
-                min_value=date.today() - timedelta(days=30),
-                max_value=date.today() + timedelta(days=365),
-            )
+    else:
+        new_deadline = None
+    
+    if st.button("✅ 追加", type="primary", use_container_width=True):
+        if not new_task.strip():
+            st.warning("タスク内容を入力してください")
         else:
-            new_deadline = None
-        
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button("❌ キャンセル", use_container_width=True):
-                st.session_state.show_add_form = False
-                st.rerun()
-        with col_b:
-            if st.button("✅ 追加", type="primary", use_container_width=True):
-                if not new_task.strip():
-                    st.warning("タスク内容を入力してください")
-                else:
-                    deadline_str = new_deadline.strftime('%Y-%m-%d') if new_deadline else ''
-                    sc.add_task(worksheet, new_task.strip(), new_assignee, deadline_str)
-                    st.session_state.show_add_form = False
-                    st.success("追加しました！")
-                    st.rerun()
+            deadline_str = new_deadline.strftime('%Y-%m-%d') if new_deadline else ''
+            sc.add_task(worksheet, new_task.strip(), new_assignee, deadline_str)
+            st.rerun()
 
 
 # ===== フィルタ =====
-st.markdown("")
 filter_options = ["全員", "社長", "kazuki"]
 filter_choice = st.radio(
     "表示する担当者",
@@ -220,26 +204,21 @@ if filter_choice != st.session_state.filter_assignee:
 # ===== タスク取得 =====
 df = sc.fetch_all_tasks(worksheet)
 
-if df.empty:
-    st.info("まだタスクがありません。「➕ 新しいタスクを追加」から追加してください。")
-    st.stop()
-
 # フィルタ適用
-if st.session_state.filter_assignee != "全員":
+if not df.empty and st.session_state.filter_assignee != "全員":
     df = df[df['assignee'] == st.session_state.filter_assignee]
 
 # 未完了・完了で分割
-df_open = df[df['status'] != '完了'].copy()
-df_done = df[df['status'] == '完了'].copy()
+if not df.empty:
+    df_open = df[df['status'] != '完了'].copy()
+    df_done = df[df['status'] == '完了'].copy()
+else:
+    df_open = df
+    df_done = df
 
 
 # ===== 緊急度分類 =====
 def categorize(deadline_str):
-    """期限文字列から緊急度カテゴリを返す
-    
-    Returns:
-        ('overdue' | 'urgent' | 'soon' | 'thisweek' | 'normal' | 'none', days_diff or None)
-    """
     if not deadline_str or deadline_str == '':
         return ('none', None)
     try:
@@ -270,11 +249,11 @@ buckets = {
     'none': [],
 }
 
-for _, row in df_open.iterrows():
-    cat, diff = categorize(row['deadline'])
-    buckets[cat].append((row, diff))
+if not df_open.empty:
+    for _, row in df_open.iterrows():
+        cat, diff = categorize(row['deadline'])
+        buckets[cat].append((row, diff))
 
-# 各バケットを期限の近い順に並べ替え
 for key in buckets:
     if key != 'none':
         buckets[key].sort(key=lambda x: x[1] if x[1] is not None else 9999)
@@ -282,7 +261,6 @@ for key in buckets:
 
 # ===== タスクカードの描画 =====
 def render_task_card(row, category, diff):
-    """タスクを1件描画"""
     task_id = int(row['id'])
     task = row['task']
     assignee = row['assignee']
@@ -290,14 +268,13 @@ def render_task_card(row, category, diff):
     
     badge_color = ASSIGNEE_COLORS.get(assignee, "#666")
     
-    # 期限テキスト
     if not deadline or deadline == '':
         deadline_html = '<span class="deadline-text">期限なし</span>'
     elif category == 'overdue':
         deadline_html = f'<span class="deadline-text urgent">⏰ {deadline} ({-diff}日超過)</span>'
     elif category == 'urgent':
         if diff == 0:
-            deadline_html = f'<span class="deadline-text urgent">⏰ 今日まで</span>'
+            deadline_html = '<span class="deadline-text urgent">⏰ 今日まで</span>'
         else:
             deadline_html = f'<span class="deadline-text urgent">⏰ {deadline} (あと{diff}日)</span>'
     elif category == 'soon':
@@ -305,7 +282,6 @@ def render_task_card(row, category, diff):
     else:
         deadline_html = f'<span class="deadline-text">📅 {deadline}</span>'
     
-    # カードのクラス
     css_class = {
         'overdue': 'urgent',
         'urgent': 'urgent',
@@ -315,7 +291,6 @@ def render_task_card(row, category, diff):
         'none': 'normal',
     }[category]
     
-    # 編集モード or 通常表示
     if st.session_state.editing_id == task_id:
         with st.container(border=True):
             st.markdown(f'<span class="assignee-badge" style="background-color: {badge_color};">{assignee}</span>', unsafe_allow_html=True)
@@ -369,7 +344,6 @@ def render_task_card(row, category, diff):
                     st.session_state.editing_id = None
                     st.rerun()
     else:
-        # 通常表示
         col1, col2, col3 = st.columns([1, 6, 2])
         with col1:
             if st.checkbox(
@@ -407,7 +381,9 @@ section_definitions = [
 
 total_open = sum(len(buckets[k]) for k in buckets)
 
-if total_open == 0:
+if df.empty:
+    st.info("まだタスクがありません。下の「＋」ボタンから追加してください。")
+elif total_open == 0:
     st.success("🎉 未完了タスクはありません！")
 else:
     for key, label in section_definitions:
@@ -420,11 +396,8 @@ else:
 
 
 # ===== 完了済みタスク =====
-st.markdown("")
-st.markdown("---")
-
 if not df_done.empty:
-    # 過去14日以内の完了タスクのみ表示
+    st.markdown("---")
     with st.expander(f"✅ 完了済み ({len(df_done)}件)", expanded=False):
         for _, row in df_done.iterrows():
             task_id = int(row['id'])
@@ -440,7 +413,7 @@ if not df_done.empty:
                     key=f"check_done_{task_id}",
                     label_visibility="collapsed",
                 ):
-                    pass  # 既に完了状態
+                    pass
                 else:
                     sc.update_task_status(worksheet, task_id, '未完了')
                     st.rerun()
@@ -458,6 +431,81 @@ if not df_done.empty:
                     st.rerun()
 
 
-# ===== フッター =====
-st.markdown("")
-st.caption(f"⚙️ {APP_VERSION} ({APP_VERSION_DATE})")
+# ===== 画面下部固定ボタン =====
+# 通常のボタンを描画し、CSS で position: fixed にして下部に固定
+st.markdown('<div id="bottom-button-anchor"></div>', unsafe_allow_html=True)
+
+# 隠しコンテナでボタンを描画
+fab_placeholder = st.empty()
+with fab_placeholder.container():
+    if st.button("＋ 新しいタスクを追加", type="primary", use_container_width=True, key="add_task_button"):
+        add_task_dialog()
+
+# JavaScript でボタンを bottom 固定領域に移動
+st.markdown("""
+<style>
+/* 「add_task_button」キーで描画されたボタンを画面下部固定にする */
+div[data-testid="stButton"]:has(button:contains("＋ 新しいタスクを追加")) {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: #0E1117;
+    padding: 12px 16px;
+    border-top: 1px solid #2a2d3a;
+    z-index: 9999;
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.3);
+    margin: 0;
+}
+
+/* ボタン自身の中身を中央寄せ */
+div[data-testid="stButton"]:has(button:contains("＋ 新しいタスクを追加")) > button {
+    max-width: 720px;
+    margin: 0 auto;
+    display: block;
+}
+</style>
+
+<script>
+// CSS の :has() がブラウザによって効かない場合の保険として
+// JavaScript でも最後のボタンを下部固定にする
+(function() {
+    function fixBottomButton() {
+        const buttons = window.parent.document.querySelectorAll('button');
+        for (const btn of buttons) {
+            if (btn.textContent && btn.textContent.includes('＋ 新しいタスクを追加')) {
+                const container = btn.closest('div[data-testid="stButton"]');
+                if (container && !container.classList.contains('fixed-bottom')) {
+                    container.classList.add('fixed-bottom');
+                    container.style.position = 'fixed';
+                    container.style.bottom = '0';
+                    container.style.left = '0';
+                    container.style.right = '0';
+                    container.style.backgroundColor = '#0E1117';
+                    container.style.padding = '12px 16px';
+                    container.style.borderTop = '1px solid #2a2d3a';
+                    container.style.zIndex = '9999';
+                    container.style.boxShadow = '0 -4px 12px rgba(0,0,0,0.3)';
+                    container.style.margin = '0';
+                    
+                    // ボタン自体の幅制限
+                    btn.style.maxWidth = '720px';
+                    btn.style.margin = '0 auto';
+                    btn.style.display = 'block';
+                }
+                break;
+            }
+        }
+    }
+    
+    // 初回実行
+    setTimeout(fixBottomButton, 100);
+    setTimeout(fixBottomButton, 500);
+    setTimeout(fixBottomButton, 1000);
+    
+    // DOM変更を監視
+    const observer = new MutationObserver(fixBottomButton);
+    observer.observe(window.parent.document.body, { childList: true, subtree: true });
+})();
+</script>
+""", unsafe_allow_html=True)
