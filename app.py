@@ -1,18 +1,18 @@
 """
-アクセルプラス やることリスト (Todo アプリ) v3.0
+アクセルプラス やることリスト (Todo アプリ) v4.0
 
 シンプルUI:
 - タイトルなし
 - 右下に常時固定のFAB（青い丸ボタン、Dropbox風）
 - FABを押すとモーダルで追加フォーム表示
-- URLパラメータでモーダル開閉を制御（安定動作）
+- リロードなしでスムーズに開く（HTMLボタン → Streamlitボタン自動クリック）
 """
 import streamlit as st
 from datetime import datetime, date, timedelta
 import sheets_client as sc
 
 
-APP_VERSION = "v3.0"
+APP_VERSION = "v4.0"
 APP_VERSION_DATE = "2026-05-27"
 
 ASSIGNEES = ["社長", "kazuki"]
@@ -88,15 +88,7 @@ def add_task_dialog():
         else:
             deadline_str = new_deadline.strftime('%Y-%m-%d') if new_deadline else ''
             sc.add_task(worksheet, new_task.strip(), new_assignee, deadline_str)
-            # URLパラメータをクリア
-            st.query_params.clear()
             st.rerun()
-
-
-# ===== URLパラメータでモーダル開閉を制御 =====
-# ?add=1 が付いていたらモーダルを開く
-if 'add' in st.query_params:
-    add_task_dialog()
 
 
 # ===== スタイル =====
@@ -105,18 +97,16 @@ st.markdown("""
 /* メインコンテナのパディング */
 .main .block-container {
     padding-top: 1rem;
-    padding-bottom: 120px;  /* FABと被らない余白 */
+    padding-bottom: 120px;
     padding-left: 1rem;
     padding-right: 1rem;
     max-width: 720px;
 }
 
-/* デフォルトのヘッダー */
 header[data-testid="stHeader"] {
     background: transparent;
 }
 
-/* タスクカード */
 .task-card {
     background-color: #1c1f26;
     border-radius: 12px;
@@ -129,7 +119,6 @@ header[data-testid="stHeader"] {
 .task-card.thisweek { border-left-color: #FFEB3B; }
 .task-card.normal { border-left-color: #607D8B; }
 
-/* 担当者バッジ */
 .assignee-badge {
     display: inline-block;
     padding: 2px 10px;
@@ -140,7 +129,6 @@ header[data-testid="stHeader"] {
     margin-right: 8px;
 }
 
-/* 期限テキスト */
 .deadline-text {
     font-size: 0.85rem;
     color: #B0BEC5;
@@ -154,7 +142,6 @@ header[data-testid="stHeader"] {
     font-weight: bold;
 }
 
-/* セクションヘッダー */
 .section-header {
     font-size: 1.05rem;
     font-weight: bold;
@@ -164,16 +151,29 @@ header[data-testid="stHeader"] {
     border-bottom: 1px solid #333;
 }
 
-/* ボタン全般 */
 .stButton button {
     width: 100%;
     border-radius: 8px;
     font-weight: bold;
 }
 
-/* チェックボックス */
 .stCheckbox > label {
     font-size: 1rem !important;
+}
+
+/* ===== 非表示のトリガーボタン ===== */
+/* "FAB_TRIGGER_HIDDEN" キーのボタンを画面外に追いやる */
+div[data-testid="stButton"]:has(button[kind="secondary"]) {
+    /* ここでは全部に影響するので、JSで判別する */
+}
+.hidden-trigger {
+    position: absolute;
+    left: -9999px;
+    top: -9999px;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -361,7 +361,7 @@ def render_task_card(row, category, diff):
 # ===== 緊急度別に表示 =====
 section_definitions = [
     ('overdue', '🔴 期限超過'),
-    ('urgent', '🔴 緊急（3日以内）'),
+    ('urgent', '🔴 緊急(3日以内)'),
     ('soon', '🟠 1週間以内'),
     ('thisweek', '🟡 2週間以内'),
     ('normal', '⚪ それ以降'),
@@ -420,14 +420,35 @@ if not df_done.empty:
                     st.rerun()
 
 
-# ===== 右下固定 FAB（Floating Action Button）=====
-# 純粋なHTMLで描画。URLパラメータ ?add=1 を付けてリロードすることでモーダルを開く
+# ===== 隠しトリガーボタン（Streamlit ネイティブ）=====
+# JavaScript からクリックされる本物のボタン
+# CSSで画面外に追いやって見えなくしている
+trigger_container = st.container()
+with trigger_container:
+    if st.button("FAB_TRIGGER_HIDDEN", key="fab_trigger_hidden_btn"):
+        add_task_dialog()
+
+
+# ===== 右下固定 FAB（見た目だけのHTMLボタン）=====
 st.markdown("""
 <style>
+/* 隠しトリガーボタン: 画面外へ */
+div[data-testid="stButton"]:has(button[data-testid*="fab_trigger_hidden_btn"]),
+div[data-testid="element-container"]:has(button:contains("FAB_TRIGGER_HIDDEN")) {
+    position: absolute !important;
+    left: -9999px !important;
+    top: -9999px !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
+}
+
+
 /* FAB本体 */
 .fab-button {
     position: fixed;
-    bottom: 24px;
+    bottom: 80px;
     right: 24px;
     width: 60px;
     height: 60px;
@@ -448,6 +469,8 @@ st.markdown("""
     transition: all 0.15s ease;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
+    padding: 0;
+    margin: 0;
 }
 .fab-button:hover {
     background-color: #1E88E5;
@@ -464,11 +487,11 @@ st.markdown("""
     margin-top: -4px;
 }
 
-/* モバイル向け調整 */
+/* モバイル: Streamlit Cloud の右下「Manage app」ボタンと被らないように、少し上に */
 @media (max-width: 640px) {
     .fab-button {
-        bottom: 20px;
-        right: 20px;
+        bottom: 90px;
+        right: 16px;
         width: 56px;
         height: 56px;
         font-size: 32px;
@@ -476,7 +499,75 @@ st.markdown("""
 }
 </style>
 
-<a href="?add=1" target="_self" class="fab-button" aria-label="新しいタスクを追加">
+<button id="custom-fab-button" class="fab-button" aria-label="新しいタスクを追加" onclick="triggerFab()">
     <span class="fab-icon">+</span>
-</a>
+</button>
+
+<script>
+// 隠しのStreamlitボタンを探してクリックする
+function triggerFab() {
+    // 親ウィンドウ(top-level)を探索
+    const doc = window.parent ? window.parent.document : document;
+    const buttons = doc.querySelectorAll('button');
+    for (const btn of buttons) {
+        if (btn.textContent && btn.textContent.trim() === 'FAB_TRIGGER_HIDDEN') {
+            btn.click();
+            return;
+        }
+    }
+    // 見つからない場合は普通の document を見る
+    const buttons2 = document.querySelectorAll('button');
+    for (const btn of buttons2) {
+        if (btn.textContent && btn.textContent.trim() === 'FAB_TRIGGER_HIDDEN') {
+            btn.click();
+            return;
+        }
+    }
+    console.log('FAB trigger button not found');
+}
+
+// FABが他のコンポーネントによって覆われていないか確認し、必要なら再配置
+(function ensureFabOnTop() {
+    const doc = window.parent ? window.parent.document : document;
+    const fab = doc.getElementById('custom-fab-button');
+    if (!fab && document.getElementById('custom-fab-button')) {
+        // ローカル文書にしかない場合、親に移動
+        const localFab = document.getElementById('custom-fab-button');
+        if (doc.body) {
+            doc.body.appendChild(localFab);
+        }
+    }
+})();
+
+// 隠しボタンを物理的に画面外に追いやる（CSSが効かない場合のフォールバック）
+(function hideTriggerButton() {
+    const doc = window.parent ? window.parent.document : document;
+    function hideIt() {
+        const buttons = doc.querySelectorAll('button');
+        for (const btn of buttons) {
+            if (btn.textContent && btn.textContent.trim() === 'FAB_TRIGGER_HIDDEN') {
+                const container = btn.closest('[data-testid="stButton"]') || btn.closest('[data-testid="element-container"]') || btn.parentElement;
+                if (container) {
+                    container.style.position = 'absolute';
+                    container.style.left = '-9999px';
+                    container.style.top = '-9999px';
+                    container.style.width = '0';
+                    container.style.height = '0';
+                    container.style.overflow = 'hidden';
+                    container.style.visibility = 'hidden';
+                }
+            }
+        }
+    }
+    hideIt();
+    setTimeout(hideIt, 100);
+    setTimeout(hideIt, 500);
+    setTimeout(hideIt, 1000);
+    
+    const observer = new MutationObserver(hideIt);
+    if (doc.body) {
+        observer.observe(doc.body, { childList: true, subtree: true });
+    }
+})();
+</script>
 """, unsafe_allow_html=True)
